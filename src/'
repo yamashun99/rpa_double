@@ -1,0 +1,91 @@
+#define rep(i, n) for (int i = 0; i < (int)(n); i++)
+#include "susceptibility.h"
+#include "common.h"
+#include "mean_field.h"
+#include "self_consistent.h"
+#include <Eigen/Dense>
+#include <cmath>
+#include <complex>
+#include <fstream>
+#include <iostream>
+#include <string>
+#include <vector>
+
+using namespace std;
+using namespace Eigen;
+
+complex<double> susceptibility(const double &temprature, const double &mu,
+                               const double &u, const double &q,
+                               const double &omega, const double &sigma1,
+                               const double &sigma2, const complex<double> &n,
+                               const complex<double> &m, const int &l1,
+                               const int &l2, const int &max_kxy) {
+  complex<double> result = 0.0;
+  complex<double> j = 1.0i;
+  rep(i, (max_kxy + 1) * (max_kxy + 1)) {
+    int i0 = i / (max_kxy + 1);
+    int i1 = i % (max_kxy + 1);
+    double kx = M_PI * (i0 - i1) / max_kxy;
+    double ky = -M_PI + M_PI * (i0 + i1) / max_kxy;
+    SelfAdjointEigenSolver<Matrix<complex<double>, 2, 2>> essigma1(
+        hamiltonian(n, m, kx + q, ky + q, sigma1, u));
+    SelfAdjointEigenSolver<Matrix<complex<double>, 2, 2>> essigma2(
+        hamiltonian(n, m, kx, ky, sigma2, u));
+    rep(mq, 2) {
+      for (int nq = -1; nq < 2; nq++) {
+        if ((mq + l1 < 0) or (mq + l1 > 1) or (mq + nq + l2 < 0) or
+            (mq + nq + l2 > 1) or (mq + nq < 0) or (mq + nq > 1) or (mq < 0) or
+            (mq > 1)) {
+          continue;
+        }
+        rep(epsilon1, 2) {
+          rep(epsilon2, 2) {
+            result +=
+                (fermi(essigma1.eigenvalues()(epsilon1) + mu, temprature) -
+                 fermi(essigma2.eigenvalues()(epsilon2) + mu, temprature)) *
+                essigma1.eigenvectors()(mq + l1, epsilon1) *
+                conj(essigma1.eigenvectors()(mq + nq + l2, epsilon1)) *
+                essigma2.eigenvectors()(mq + nq, epsilon2) *
+                conj(essigma2.eigenvectors()(mq, epsilon2)) /
+                (essigma1.eigenvalues()(epsilon1) -
+                 essigma2.eigenvalues()(epsilon2) - (omega + 1e-6 * j));
+          }
+        }
+      }
+    }
+  }
+  return result;
+}
+
+int main() {
+  double u = 1.0;
+  auto phys_val = scc(100, u);
+  complex<double> n = get<0>(phys_val);
+  complex<double> m = get<1>(phys_val);
+  double mu = get<2>(phys_val);
+  string fname = "../data/q_q.csv";
+  ofstream myfile(fname);
+  rep(iq, 10) {
+    double q = M_PI / 10 * iq;
+    vector<vector<complex<double>>> chi(2, vector<complex<double>>(2));
+    rep(i, 10) {
+      double omega = 1.0 * i / 10;
+      rep(l1, 2) {
+        rep(l2, 2) {
+          chi[l1][l2] = susceptibility(1e-5, mu, u, q, omega, -1.0, 1.0, n, m,
+                                       l1, l2, 100);
+        }
+      }
+      complex<double> det;
+      det =
+          (1.0 - u * chi[0][0]) * (1.0 - u * chi[1][1]) - pow(u * chi[0][1], 2);
+      cout << det << endl;
+      if (i < 99) {
+        myfile << imag(D) << ",";
+      } else if (i == 99) {
+        myfile << imag(D) << endl;
+      }
+    }
+  }
+  myfile.close();
+}
